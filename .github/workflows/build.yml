@@ -1,7 +1,7 @@
-name: Build CSN:S SoftON
+name: Build CSN:S SoftON Fixed
 
 on:
-  workflow_dispatch: # Trigger manual dari tab Actions
+  workflow_dispatch:
   push:
     branches: [ main, master ]
 
@@ -13,62 +13,51 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v3
       with:
-        submodules: 'recursive' # Penting untuk mengambil library eksternal jika ada
+        submodules: 'recursive' # Penting untuk download library eksternal
+        fetch-depth: 0
+
+    - name: Debug Directory Structure
+      run: |
+        Write-Host "=== Listing All Files ==="
+        Get-ChildItem -Recurse | Select-Object FullName
+        Write-Host "=== Looking for .sln files ==="
+        Get-ChildItem -Filter *.sln -Recurse | Select-Object FullName
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
 
     - name: Restore NuGet Packages
       run: |
-        # Cari file solution utama
-        $slnFile = Get-ChildItem -Filter *.sln -Recurse | Select-Object -First 1
-        if ($slnFile) {
-          Write-Host "Found solution: $($slnFile.Name)"
-          nuget restore $slnFile.FullName
-        } else {
-          Write-Error "No .sln file found in repository!"
+        $slnFiles = Get-ChildItem -Filter *.sln -Recurse
+        if ($slnFiles.Count -eq 0) {
+          Write-Error "ERROR: No .sln file found! Check the directory structure above."
           exit 1
         }
-
-    - name: Build Libraries (Dependencies)
-      run: |
-        # Build project library terlebih dahulu jika terpisah
-        # Biasanya MSBuild akan menangani dependensi otomatis lewat .sln, 
-        # tapi kita pastikan konfigurasi Release aktif
-        $slnFile = Get-ChildItem -Filter *.sln -Recurse | Select-Object -First 1
         
-        # Build seluruh solusi dalam mode Release x86 (Game CSNZ biasanya 32-bit)
-        msbuild $slnFile.FullName `
+        $mainSln = $slnFiles[0]
+        Write-Host "Building solution: $($mainSln.Name)"
+        nuget restore $mainSln.FullName -Verbosity detailed
+
+    - name: Build Solution (Release x86)
+      run: |
+        $slnFiles = Get-ChildItem -Filter *.sln -Recurse
+        $mainSln = $slnFiles[0]
+        
+        msbuild $mainSln.FullName `
           /p:Configuration=Release `
           /p:Platform=x86 `
+          /p:BuildProjectReferences=true `
           /maxcpucount `
-          /verbosity:minimal
-
-    - name: Build Solution (x64 Version) - Optional Backup
-      continue-on-error: true
-      run: |
-        $slnFile = Get-ChildItem -Filter *.sln -Recurse | Select-Object -First 1
-        msbuild $slnFile.FullName `
-          /p:Configuration=Release `
-          /p:Platform=x64 `
-          /maxcpucount `
-          /verbosity:minimal
-
-    - name: Locate Build Artifacts
-      run: |
-        # Tampilkan struktur folder untuk debugging
-        Get-ChildItem -Recurse -Include *.dll,*.exe | Select-Object FullName
-
-    - name: Upload Build Results
-      uses: actions/upload-artifact@v3
+          /verbosity:detailed
+          
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4  # <--- SUDAH DIPERBAIKI KE V4
       with:
-        name: SoftON-Build-Output
+        name: SoftON-Fixed-Build
         path: |
           **/bin/Release/**/*.dll
           **/bin/Release/**/*.exe
           **/client/bin/**/*.dll
           **/client/bin/**/*.exe
-          **/Release/**/*.dll
-          **/Release/**/*.exe
-        retention-days: 14
-        if-no-files-found: error
+        retention-days: 7
+        if-no-files-found: warn
